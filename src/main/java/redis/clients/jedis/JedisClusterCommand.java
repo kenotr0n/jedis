@@ -10,9 +10,9 @@ import redis.clients.util.JedisClusterCRC16;
 
 public abstract class JedisClusterCommand<T> {
 
-  private JedisClusterConnectionHandler connectionHandler;
-  private int redirections;
-  private ThreadLocal<Jedis> askConnection = new ThreadLocal<Jedis>();
+  protected JedisClusterConnectionHandler connectionHandler;
+  protected int redirections;
+  protected ThreadLocal<Jedis> askConnection = new ThreadLocal<Jedis>();
 
   public JedisClusterCommand(JedisClusterConnectionHandler connectionHandler, int maxRedirections) {
     this.connectionHandler = connectionHandler;
@@ -26,10 +26,10 @@ public abstract class JedisClusterCommand<T> {
       throw new JedisClusterException("No way to dispatch this command to Redis Cluster.");
     }
 
-    return runWithRetries(key, this.redirections, false, false);
+    return runWithRetries(this.redirections, false, false, key);
   }
 
-  private T runWithRetries(String key, int redirections, boolean tryRandomNode, boolean asking) {
+  protected T runWithRetries(int redirections, boolean tryRandomNode, boolean asking, String... keys) {
     if (redirections <= 0) {
       throw new JedisClusterMaxRedirectionsException("Too many Cluster redirections?");
     }
@@ -49,7 +49,16 @@ public abstract class JedisClusterCommand<T> {
         if (tryRandomNode) {
           connection = connectionHandler.getConnection();
         } else {
-          connection = connectionHandler.getConnectionFromSlot(JedisClusterCRC16.getSlot(key));
+          int lastSlot = -1;
+          // make sure all keys hash to same slot:
+          for (String key : keys) {
+              int thisSlot = JedisClusterCRC16.getSlot(key);
+              if (lastSlot == -1)
+                  lastSlot = thisSlot;
+              else if (lastSlot != thisSlot)
+                  throw new JedisClusterException("All keys in multi-key command must hash to same slot");
+          }
+          connection = connectionHandler.getConnectionFromSlot(lastSlot);
         }
       }
 
@@ -64,7 +73,7 @@ public abstract class JedisClusterCommand<T> {
       connection = null;
 
       // retry with random connection
-      return runWithRetries(key, redirections - 1, true, asking);
+      return runWithRetries(redirections - 1, true, asking, keys);
     } catch (JedisRedirectionException jre) {
       if (jre instanceof JedisAskDataException) {
         asking = true;
@@ -80,7 +89,7 @@ public abstract class JedisClusterCommand<T> {
       releaseConnection(connection, false);
       connection = null;
 
-      return runWithRetries(key, redirections - 1, false, asking);
+      return runWithRetries(redirections - 1, false, asking, keys);
     } finally {
       releaseConnection(connection, false);
     }

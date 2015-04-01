@@ -3,6 +3,7 @@ package redis.clients.jedis;
 import java.io.Closeable;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
 import java.util.Map.Entry;
 import java.util.Set;
 
@@ -94,6 +95,16 @@ public class JedisCluster implements JedisCommands, BasicCommands, Closeable {
         return connection.get(key);
       }
     }.run(key);
+  }
+
+  //@Override
+  public List<String> mget(final String... keys) {
+    return Arrays.asList(new JedisClusterMultiKeyCommand<String[]>(connectionHandler, maxRedirections) {
+      @Override
+      public String[] execute(Jedis connection) {
+        return connection.mget(keys).toArray(new String[keys.length]);
+      }
+    }.run((String[])keys));
   }
 
   @Override
